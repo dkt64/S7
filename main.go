@@ -91,13 +91,14 @@ func S7Get(c *gin.Context) {
 	// Typ połączania
 	c.Header("Access-Control-Allow-Origin", "*")
 	// c.Header("Content-Type", "multipart/form-data")
-	c.Header("Connection", "Keep-Alive")
-	c.Header("Transfer-Encoding", "chunked")
+	// c.Header("Connection", "Keep-Alive")
+	// c.Header("Transfer-Encoding", "chunked")
+	c.Header("X-Accel-Buffering", "no")
 
 	plcAddress := c.Query("plc_address")
 
 	if net.ParseIP(plcAddress) != nil {
-		log.Println("Odbebrałem adres IP: " + plcAddress)
+		// log.Println("Odbebrałem adres IP: " + plcAddress)
 
 		// tcpDevice = "192.168.1.10" // NetLink
 		const (
@@ -120,17 +121,22 @@ func S7Get(c *gin.Context) {
 		bufEB := make([]byte, 128)
 		bufMB := make([]byte, 128)
 
+		// w := c.Writer
+		// clientGone := w.CloseNotify()
+
 		// Streaming LOOP...
 		// ----------------------------------------------------------------------------------------------
 
 		// for {
 
-		// // Wysyłamy pakiet co 100 ms
-		// time.Sleep(200 * time.Millisecond)
+		// 	// Jeżeli straciimy kontekst to wychodzimy
+		// 	if c.Request.Context() == nil {
+		// 		log.Println("ERR! c.Request.Context() == nil")
+		// 		break
+		// 	}
 
-		// // Jeżeli straciimy kontekst to wychodzimy
-		// if c.Request.Context() == nil {
-		// 	log.Println("ERR! c.Request.Context() == nil")
+		// if <-clientGone {
+		// 	log.Println("Client Gone...")
 		// 	break
 		// }
 
@@ -138,8 +144,6 @@ func S7Get(c *gin.Context) {
 		client.AGReadMB(0, 128, bufMB)
 
 		var buf []byte
-		// example
-		// to combine two slices or join arrays, use for loop and builtin append function
 		for index := range bufMB {
 			buf = append(buf, bufEB[index])
 		}
@@ -148,17 +152,21 @@ func S7Get(c *gin.Context) {
 		}
 
 		c.Data(http.StatusOK, "multipart/form-data", buf)
+		// w.Write(buf)
+		// w.Flush()
+
 		// c.JSON(http.StatusOK, buf)
 
-		log.Println(buf)
+		// log.Println(buf)
 
 		// log.Println(bufMB)
 		// c.JSON(http.StatusOK, "OK")
 
+		// time.Sleep(200 * time.Millisecond)
 		// }
 
-		// Feedback gdybyśmy wyszli z LOOP
-		log.Println("Loop ended.")
+		// // Feedback gdybyśmy wyszli z LOOP
+		// log.Println("Loop ended.")
 		// c.JSON(http.StatusOK, "Loop ended.")
 
 	} else {
