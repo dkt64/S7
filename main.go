@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -96,18 +97,19 @@ func S7Get(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 
 	plcAddress := c.Query("plc_address")
+	slotNr, _ := strconv.Atoi(c.Query("slot_nr"))
 
 	if net.ParseIP(plcAddress) != nil {
 		// log.Println("Odbebrałem adres IP: " + plcAddress)
 
 		// tcpDevice = "192.168.1.10" // NetLink
-		const (
-			rack = 0
-			slot = 2
-		)
+		// const (
+		// 	rack = 0
+		// 	slot = slotNr
+		// )
 
 		// TCPClient
-		handler := gos7.NewTCPClientHandler(plcAddress, rack, slot)
+		handler := gos7.NewTCPClientHandler(plcAddress, 0, slotNr)
 		handler.Timeout = 5 * time.Second
 		handler.IdleTimeout = 5 * time.Second
 		handler.PDULength = 960
