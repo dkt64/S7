@@ -98,6 +98,7 @@ func S7Get(c *gin.Context) {
 
 	plcAddress := c.Query("plc_address")
 	slotNr, _ := strconv.Atoi(c.Query("slot_nr"))
+	period, _ := strconv.Atoi(c.Query("period"))
 
 	if net.ParseIP(plcAddress) != nil {
 		// log.Println("Odbebrałem adres IP: " + plcAddress)
@@ -110,7 +111,7 @@ func S7Get(c *gin.Context) {
 
 		// TCPClient
 		handler := gos7.NewTCPClientHandler(plcAddress, 0, slotNr)
-		handler.Timeout = 5 * time.Second
+		handler.Timeout = time.Duration(period*1000000) * time.Millisecond
 		handler.IdleTimeout = 5 * time.Second
 		handler.PDULength = 960
 		// handler.Logger = log.New(os.Stdout, "tcp: ", log.LstdFlags)
