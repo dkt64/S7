@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	"github.com/robinson/gos7"
 )
@@ -180,6 +181,48 @@ func S7Get(c *gin.Context) {
 
 }
 
+// eventHandler - Zdarzenia
+// ================================================================================================
+func eventHandler(c *gin.Context) {
+	// func eventHandler(w http.ResponseWriter, req *http.Request) {
+
+	// Typ połączania
+	c.Header("Access-Control-Allow-Origin", "*")
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Connection", "Keep-Alive")
+	c.Header("Transfer-Encoding", "chunked")
+	c.Header("X-Accel-Buffering", "no")
+
+	log.Println("eventHandler")
+	c.JSON(http.StatusOK, "eventHandler")
+
+	w := c.Writer
+
+	// data can be a primitive like a string, an integer or a float
+	var ix int
+	for ix = 0; ix < 40; ix++ {
+		sse.Encode(w, sse.Event{
+			Event: "chat",
+			Data:  "event nr " + strconv.Itoa(ix),
+		})
+
+		log.Println("event nr " + strconv.Itoa(ix))
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// // also a complex type, like a map, a struct or a slice
+	// sse.Encode(w, sse.Event{
+	// 	Id:    "124",
+	// 	Event: "message",
+	// 	Data: map[string]interface{}{
+	// 		"user":    "manu",
+	// 		"date":    time.Now().Unix(),
+	// 		"content": "hi!",
+	// 	},
+	// })
+
+}
+
 // main - Program główny
 // ================================================================================================
 func main() {
@@ -195,10 +238,8 @@ func main() {
 	// r.StaticFile("/", "./dist/index.html")
 	// r.StaticFile("favicon.ico", "./dist/favicon.ico")
 
-	api := r.Group("/api/v1")
-	{
-		api.GET("/s7", S7Get)
-	}
+	r.GET("/api/v1/s7", S7Get)
+	r.GET("/api/v1/events", eventHandler)
 
 	r.Run(":80")
 }
