@@ -112,7 +112,7 @@ func S7Get(c *gin.Context) {
 
 		// TCPClient
 		handler := gos7.NewTCPClientHandler(plcAddress, 0, slotNr)
-		handler.Timeout = time.Duration(period*1000000) * time.Millisecond
+		handler.Timeout = time.Duration(period) * time.Millisecond
 		handler.IdleTimeout = 5 * time.Second
 		handler.PDULength = 960
 		// handler.Logger = log.New(os.Stdout, "tcp: ", log.LstdFlags)
@@ -186,28 +186,86 @@ func S7Get(c *gin.Context) {
 func eventHandler(c *gin.Context) {
 	// func eventHandler(w http.ResponseWriter, req *http.Request) {
 
-	// Typ połączania
-	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Connection", "Keep-Alive")
-	c.Header("Transfer-Encoding", "chunked")
-	c.Header("X-Accel-Buffering", "no")
+	plcAddress := c.Query("plc_address")
+	slotNr, _ := strconv.Atoi(c.Query("slot_nr"))
+	period, _ := strconv.Atoi(c.Query("period"))
 
-	log.Println("eventHandler")
-	c.JSON(http.StatusOK, "eventHandler")
+	if net.ParseIP(plcAddress) != nil {
+		log.Println("Odbebrałem adres IP: " + plcAddress)
 
-	w := c.Writer
+		// TCPClient
+		handler := gos7.NewTCPClientHandler(plcAddress, 0, slotNr)
+		handler.Timeout = time.Duration(period*1000000) * time.Millisecond
+		handler.IdleTimeout = 5 * time.Second
+		handler.PDULength = 960
+		// handler.Logger = log.New(os.Stdout, "tcp: ", log.LstdFlags)
 
-	// data can be a primitive like a string, an integer or a float
-	var ix int
-	for ix = 0; ix < 40; ix++ {
-		sse.Encode(w, sse.Event{
-			Event: "chat",
-			Data:  "event nr " + strconv.Itoa(ix),
-		})
+		// Connect manually so that multiple requests are handled in one connection session
+		handler.Connect()
+		defer handler.Close()
 
-		log.Println("event nr " + strconv.Itoa(ix))
-		time.Sleep(50 * time.Millisecond)
+		client := gos7.NewClient(handler)
+		bufEB := make([]byte, 128)
+		bufMB := make([]byte, 128)
+
+		// Typ połączania
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Connection", "Keep-Alive")
+		c.Header("Transfer-Encoding", "chunked")
+		c.Header("X-Accel-Buffering", "no")
+		c.Header("Cache-Control", "no-cache")
+
+		log.Println("eventHandler")
+		c.JSON(http.StatusOK, "eventHandler")
+
+		w := c.Writer
+
+		clientGone := w.CloseNotify()
+		var closed bool
+
+		go func() {
+			<-clientGone
+			closed = true
+		}()
+
+		// data can be a primitive like a string, an integer or a float
+		var ix int
+		// for ix = 0; ix < 40; ix++ {
+		for {
+
+			client.AGReadEB(0, 128, bufEB)
+			client.AGReadMB(0, 128, bufMB)
+
+			var buf []byte
+			for index := range bufMB {
+				buf = append(buf, bufEB[index])
+			}
+			for index := range bufMB {
+				buf = append(buf, bufMB[index])
+			}
+
+			sse.Encode(w, sse.Event{
+				Event: "data",
+				Data:  "event nr " + strconv.Itoa(ix),
+			})
+			log.Println("event nr " + strconv.Itoa(ix))
+			w.Flush()
+
+			time.Sleep(time.Duration(period) * time.Millisecond)
+
+			if closed {
+				log.Println("Client Gone...")
+				break
+			}
+
+			ix++
+		}
+	} else {
+
+		log.Println("Odbebrałem niepoprawny adres IP: " + plcAddress)
+		c.JSON(http.StatusOK, "Odbebrałem niepoprawny adres IP: "+plcAddress)
+
 	}
 
 	// // also a complex type, like a map, a struct or a slice
@@ -238,8 +296,8 @@ func main() {
 	// r.StaticFile("/", "./dist/index.html")
 	// r.StaticFile("favicon.ico", "./dist/favicon.ico")
 
-	r.GET("/api/v1/s7", S7Get)
-	r.GET("/api/v1/events", eventHandler)
+	// r.GET("/api/v1/s7", S7Get)
+	r.GET("/api/v1/s7", eventHandler)
 
 	r.Run(":80")
 }
