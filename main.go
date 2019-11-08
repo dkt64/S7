@@ -229,6 +229,8 @@ func eventHandler(c *gin.Context) {
 			closed = true
 		}()
 
+		log.Println("LOOP start for PLC IP " + plcAddress + " ...")
+
 		// data can be a primitive like a string, an integer or a float
 		var ix int
 		// for ix = 0; ix < 40; ix++ {
@@ -261,7 +263,7 @@ func eventHandler(c *gin.Context) {
 					"content": buf,
 				},
 			})
-			log.Println(plcAddress + ": " + strconv.FormatInt(timestamp, 10))
+			// log.Println(plcAddress + ": " + strconv.FormatInt(timestamp, 10))
 
 			w.Flush()
 
@@ -279,6 +281,8 @@ func eventHandler(c *gin.Context) {
 		log.Println("Odbebrałem niepoprawny adres IP: " + plcAddress)
 		c.JSON(http.StatusOK, "Odbebrałem niepoprawny adres IP: "+plcAddress)
 	}
+
+	log.Println("LOOP end for PLC IP " + plcAddress)
 
 	// // also a complex type, like a map, a struct or a slice
 	// sse.Encode(w, sse.Event{
