@@ -236,6 +236,12 @@ func eventHandler(c *gin.Context) {
 		// for ix = 0; ix < 40; ix++ {
 		for {
 
+			// Jeżeli połączenie zamknięte to break
+			if closed {
+				log.Println("Client Gone...")
+				break
+			}
+
 			client.AGReadEB(0, 128, bufEB)
 			client.AGReadMB(0, 128, bufMB)
 
@@ -255,24 +261,23 @@ func eventHandler(c *gin.Context) {
 			// })
 			// log.Println("event nr " + strconv.Itoa(ix))
 
+			dane := map[string]interface{}{
+				"time":    timestamp,
+				"content": buf,
+			}
+
 			sse.Encode(w, sse.Event{
 				Id:    plcAddress,
 				Event: "data",
-				Data: map[string]interface{}{
-					"time":    timestamp,
-					"content": buf,
-				},
+				Data:  dane,
 			})
+
 			// log.Println(plcAddress + ": " + strconv.FormatInt(timestamp, 10))
+			// log.Println(bufMB)
 
+			// Wysłanie i poczekanie
 			w.Flush()
-
 			time.Sleep(time.Duration(period) * time.Millisecond)
-
-			if closed {
-				log.Println("Client Gone...")
-				break
-			}
 
 			ix++
 		}
