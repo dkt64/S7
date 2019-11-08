@@ -198,7 +198,7 @@ func eventHandler(c *gin.Context) {
 		handler.Timeout = time.Duration(period*1000000) * time.Millisecond
 		handler.IdleTimeout = 5 * time.Second
 		handler.PDULength = 960
-		// handler.Logger = log.New(os.Stdout, "tcp: ", log.LstdFlags)
+		// handler.Logger = log.New(os.Stdout, plcAddress+" : ", log.LstdFlags)
 
 		// Connect manually so that multiple requests are handled in one connection session
 		handler.Connect()
@@ -245,11 +245,24 @@ func eventHandler(c *gin.Context) {
 				buf = append(buf, bufMB[index])
 			}
 
+			timestamp := time.Now().UnixNano()
+
+			// sse.Encode(w, sse.Event{
+			// 	Event: "data",
+			// 	Data:  "event nr " + strconv.Itoa(ix),
+			// })
+			// log.Println("event nr " + strconv.Itoa(ix))
+
 			sse.Encode(w, sse.Event{
+				Id:    plcAddress,
 				Event: "data",
-				Data:  "event nr " + strconv.Itoa(ix),
+				Data: map[string]interface{}{
+					"time":    timestamp,
+					"content": buf,
+				},
 			})
-			log.Println("event nr " + strconv.Itoa(ix))
+			log.Println(plcAddress + ": " + strconv.FormatInt(timestamp, 10))
+
 			w.Flush()
 
 			time.Sleep(time.Duration(period) * time.Millisecond)
@@ -265,7 +278,6 @@ func eventHandler(c *gin.Context) {
 
 		log.Println("Odbebrałem niepoprawny adres IP: " + plcAddress)
 		c.JSON(http.StatusOK, "Odbebrałem niepoprawny adres IP: "+plcAddress)
-
 	}
 
 	// // also a complex type, like a map, a struct or a slice
