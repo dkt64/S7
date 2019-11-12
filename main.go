@@ -245,8 +245,10 @@ func eventHandler(c *gin.Context) {
 				break
 			}
 
+			readTimeStart := time.Now().UnixNano()
 			client.AGReadEB(0, 128, bufEB)
 			client.AGReadMB(0, 128, bufMB)
+			readTimeEnd := time.Now().UnixNano()
 
 			var buf []byte
 			for index := range bufMB {
@@ -257,6 +259,7 @@ func eventHandler(c *gin.Context) {
 			}
 
 			timestamp := time.Now().UnixNano()
+			// log.Println(time.Now().Second())
 
 			// sse.Encode(w, sse.Event{
 			// 	Event: "data",
@@ -274,7 +277,6 @@ func eventHandler(c *gin.Context) {
 
 			// Wysyłamy do VISU co 500 ms
 			newTime := time.Now().UnixNano()
-			// log.Println(newTime)
 
 			// if time.Since(lastTime).Nanoseconds() > 500000000 {
 			if newTime-lastTime > 500000000 {
@@ -287,9 +289,13 @@ func eventHandler(c *gin.Context) {
 				// Wysłanie i poczekanie
 				w.Flush()
 
+				// Czas ostatniego odczytu z PLC
+				log.Println("Szybkość odczytu z PLC " + plcAddress + " " + strconv.FormatInt((readTimeEnd-readTimeStart)/1000000, 10) + " ms")
+
 				// log.Println(plcAddress + " Wysłano: " + strconv.FormatInt(timestamp, 10))
 
 				lastTime = time.Now().UnixNano()
+
 				// log.Println(lastTime)
 			}
 
