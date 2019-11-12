@@ -234,6 +234,9 @@ func eventHandler(c *gin.Context) {
 		// data can be a primitive like a string, an integer or a float
 		var ix int
 		// for ix = 0; ix < 40; ix++ {
+
+		lastTime := time.Now().UnixNano()
+
 		for {
 
 			// Jeżeli połączenie zamknięte to break
@@ -266,17 +269,30 @@ func eventHandler(c *gin.Context) {
 				"content": buf,
 			}
 
-			sse.Encode(w, sse.Event{
-				Id:    plcAddress,
-				Event: "data",
-				Data:  dane,
-			})
+			// log.Println(plcAddress + " Odczyt: " + strconv.FormatInt(timestamp, 10))
+			// log.Println(time.Since(lastTime).Nanoseconds())
 
-			// log.Println(plcAddress + ": " + strconv.FormatInt(timestamp, 10))
-			// log.Println(bufMB)
+			// Wysyłamy do VISU co 500 ms
+			newTime := time.Now().UnixNano()
+			// log.Println(newTime)
 
-			// Wysłanie i poczekanie
-			w.Flush()
+			// if time.Since(lastTime).Nanoseconds() > 500000000 {
+			if newTime-lastTime > 500000000 {
+
+				sse.Encode(w, sse.Event{
+					Id:    plcAddress,
+					Event: "data",
+					Data:  dane,
+				})
+				// Wysłanie i poczekanie
+				w.Flush()
+
+				// log.Println(plcAddress + " Wysłano: " + strconv.FormatInt(timestamp, 10))
+
+				lastTime = time.Now().UnixNano()
+				// log.Println(lastTime)
+			}
+
 			time.Sleep(time.Duration(period) * time.Millisecond)
 
 			ix++
