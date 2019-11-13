@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -28,14 +29,16 @@ func base64Decode(str string) (string, bool) {
 	return string(data), false
 }
 
-// MachineTimeline - Moja struktura i tablica
+// DataRecord - Rekord danych
 // ========================================================
-type MachineTimeline struct {
+type DataRecord struct {
 	Timestamp int64  `gorm:"AUTO_INCREMENT" form:"v" json:"Timestamp"`
 	IOImage   []byte `gorm:"not null" form:"IOImage" json:"IOImage"`
 }
 
-var machineTimeline []MachineTimeline
+// machineTimeline - Dane
+// ========================================================
+var machineTimeline []DataRecord
 
 // ErrCheck - obsługa błedów
 // ================================================================================================
@@ -68,9 +71,14 @@ func Options(c *gin.Context) {
 func SendData(c *gin.Context) {
 	// Typ połączania
 	c.Header("Access-Control-Allow-Origin", "*")
-
 	log.Println("GetData()")
-	c.JSON(http.StatusOK, machineTimeline)
+
+	// log.Println(machineTimeline[0].Timestamp)
+
+	data, _ := json.Marshal(machineTimeline)
+	// log.Println(string(data))
+
+	c.JSON(http.StatusOK, string(data))
 }
 
 //
@@ -153,7 +161,7 @@ func eventHandler(c *gin.Context) {
 				"content": buf,
 			}
 
-			machineTimeline = append(machineTimeline, MachineTimeline{Timestamp: readTimeEnd, IOImage: buf})
+			machineTimeline = append(machineTimeline, DataRecord{Timestamp: readTimeEnd, IOImage: buf})
 
 			// Wysyłamy do VISU co 500 ms
 
