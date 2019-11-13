@@ -219,7 +219,7 @@ func main() {
 	// r.StaticFile("favicon.ico", "./dist/favicon.ico")
 	// r.GET("/api/v1/s7", S7Get)
 
-	r.GET("/data", SendData)
+	r.GET("/api/v1/data", SendData)
 	r.GET("/api/v1/s7", eventHandler)
 
 	r.Run(":80")
