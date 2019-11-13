@@ -1,0 +1,1 @@
+docker run --name influxdb -p 9999:9999 quay.io/influxdb/influxdb:2.0.0-alpha
