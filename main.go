@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 )
 
 var plcAddress string
+var plcConnected bool
 
 func base64Encode(str string) string {
 	return base64.StdEncoding.EncodeToString([]byte(str))
@@ -29,16 +31,16 @@ func base64Decode(str string) (string, bool) {
 	return string(data), false
 }
 
-// DataRecord - Rekord danych
+// MachineImage - Rekord danych
 // ========================================================
-type DataRecord struct {
+type MachineImage struct {
 	Timestamp int64  `gorm:"AUTO_INCREMENT" form:"v" json:"Timestamp"`
 	IOImage   []byte `gorm:"not null" form:"IOImage" json:"IOImage"`
 }
 
 // machineTimeline - Dane
 // ========================================================
-var machineTimeline []DataRecord
+var machineTimeline []MachineImage
 
 // ErrCheck - obsługa błedów
 // ================================================================================================
@@ -82,6 +84,34 @@ func SendData(c *gin.Context) {
 }
 
 //
+// ImageCompare - Wysłanie całej tablicy
+// ================================================================================================
+func ImageCompare(im1 MachineImage, im2 MachineImage) bool {
+
+	if bytes.Compare(im1.IOImage, im2.IOImage) == 0 {
+		return true
+	}
+	return false
+}
+
+//
+// ScanTimeline - Wysłanie całej tablicy
+// ================================================================================================
+func ScanTimeline() {
+
+	for {
+		for i, image1 := range machineTimeline {
+			for j, image2 := range machineTimeline {
+				if ImageCompare(image1, image2) && i != j && ((i-j > 1) || (i-j < -1)) {
+					log.Println("timestamp = " + strconv.FormatInt(image2.Timestamp/1000000, 10) + " [ms], i = " + strconv.Itoa(i) + ", j = " + strconv.Itoa(j))
+				}
+			}
+		}
+		time.Sleep(3000 * time.Millisecond)
+	}
+}
+
+//
 // eventHandler - Zdarzenia
 // ================================================================================================
 func eventHandler(c *gin.Context) {
@@ -96,98 +126,111 @@ func eventHandler(c *gin.Context) {
 
 		// TCPClient
 		handler := gos7.NewTCPClientHandler(plcAddress, 0, slotNr)
-		handler.Timeout = time.Duration(period*1000000) * time.Millisecond
+		handler.Timeout = 5 * time.Second
 		handler.IdleTimeout = 5 * time.Second
 		handler.PDULength = 960
+
 		// handler.Logger = log.New(os.Stdout, plcAddress+" : ", log.LstdFlags)
 
 		// Connect manually so that multiple requests are handled in one connection session
-		handler.Connect()
+		ret := handler.Connect()
 		defer handler.Close()
-
+		// log.Println(ret)
 		client := gos7.NewClient(handler)
-		bufEB := make([]byte, 128)
-		bufMB := make([]byte, 128)
+		// log.Println(client)
 
-		// Typ połączania
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Connection", "Keep-Alive")
-		c.Header("Transfer-Encoding", "chunked")
-		c.Header("X-Accel-Buffering", "no")
-		c.Header("Cache-Control", "no-cache")
+		if ErrCheck(ret) {
+			plcConnected = true
+			bufEB := make([]byte, 128)
+			bufMB := make([]byte, 128)
 
-		log.Println("eventHandler()")
-		c.JSON(http.StatusOK, "eventHandler")
+			// Typ połączania
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.Header("Content-Type", "text/event-stream")
+			c.Header("Connection", "Keep-Alive")
+			c.Header("Transfer-Encoding", "chunked")
+			c.Header("X-Accel-Buffering", "no")
+			c.Header("Cache-Control", "no-cache")
 
-		w := c.Writer
+			log.Println("eventHandler()")
+			c.JSON(http.StatusOK, "eventHandler")
 
-		clientGone := w.CloseNotify()
-		var closed bool
+			w := c.Writer
 
-		go func() {
-			<-clientGone
-			closed = true
-		}()
+			clientGone := w.CloseNotify()
 
-		log.Println("LOOP start for PLC IP " + plcAddress + " ...")
+			go func() {
+				<-clientGone
+				plcConnected = false
+			}()
 
-		var ix int
-		lastTime := time.Now().UnixNano()
+			log.Println("LOOP start for PLC IP " + plcAddress + " ...")
 
-		for {
+			var ix int
+			lastTime := time.Now().UnixNano()
 
-			// Jeżeli połączenie zamknięte to break
-			if closed {
-				log.Println("Client Gone...")
-				break
+			for {
+
+				// Jeżeli połączenie zamknięte to break
+				if !plcConnected {
+					log.Println("Client Gone...")
+					break
+				}
+
+				readTimeStart := time.Now().UnixNano()
+				client.AGReadEB(0, 128, bufEB)
+				client.AGReadMB(0, 128, bufMB)
+				readTimeEnd := time.Now().UnixNano()
+
+				if bufEB == nil || bufMB == nil {
+					log.Println("NIL...")
+					break
+				}
+
+				var buf []byte
+				for index := range bufMB {
+					buf = append(buf, bufEB[index])
+				}
+				for index := range bufMB {
+					buf = append(buf, bufMB[index])
+				}
+
+				dane := map[string]interface{}{
+					"time":    readTimeEnd,
+					"content": buf,
+				}
+
+				machineTimeline = append(machineTimeline, MachineImage{Timestamp: readTimeEnd, IOImage: buf})
+
+				// Wysyłamy do VISU co 500 ms
+
+				if readTimeEnd-lastTime > 500000000 {
+
+					sse.Encode(w, sse.Event{
+						Id:    plcAddress,
+						Event: "data",
+						Data:  dane,
+					})
+					// Wysłanie i poczekanie
+					w.Flush()
+
+					// Czas ostatniego odczytu z PLC
+					log.Println("Szybkość odczytu z PLC " + plcAddress + " " + strconv.FormatInt((readTimeEnd-readTimeStart)/1000000, 10) + " ms")
+
+					// log.Println(plcAddress + " Wysłano: " + strconv.FormatInt(timestamp, 10))
+
+					lastTime = time.Now().UnixNano()
+
+					// log.Println(lastTime)
+				}
+
+				time.Sleep(time.Duration(period) * time.Millisecond)
+
+				ix++
 			}
-
-			readTimeStart := time.Now().UnixNano()
-			client.AGReadEB(0, 128, bufEB)
-			client.AGReadMB(0, 128, bufMB)
-			readTimeEnd := time.Now().UnixNano()
-
-			var buf []byte
-			for index := range bufMB {
-				buf = append(buf, bufEB[index])
-			}
-			for index := range bufMB {
-				buf = append(buf, bufMB[index])
-			}
-
-			dane := map[string]interface{}{
-				"time":    readTimeEnd,
-				"content": buf,
-			}
-
-			machineTimeline = append(machineTimeline, DataRecord{Timestamp: readTimeEnd, IOImage: buf})
-
-			// Wysyłamy do VISU co 500 ms
-
-			if readTimeEnd-lastTime > 500000000 {
-
-				sse.Encode(w, sse.Event{
-					Id:    plcAddress,
-					Event: "data",
-					Data:  dane,
-				})
-				// Wysłanie i poczekanie
-				w.Flush()
-
-				// Czas ostatniego odczytu z PLC
-				log.Println("Szybkość odczytu z PLC " + plcAddress + " " + strconv.FormatInt((readTimeEnd-readTimeStart)/1000000, 10) + " ms")
-
-				// log.Println(plcAddress + " Wysłano: " + strconv.FormatInt(timestamp, 10))
-
-				lastTime = time.Now().UnixNano()
-
-				// log.Println(lastTime)
-			}
-
-			time.Sleep(time.Duration(period) * time.Millisecond)
-
-			ix++
+		} else {
+			log.Println("Problem z połączeniem z " + plcAddress)
+			c.JSON(http.StatusOK, "Problem z połączeniem z "+plcAddress)
 		}
 	} else {
 
@@ -229,6 +272,8 @@ func main() {
 
 	r.GET("/api/v1/data", SendData)
 	r.GET("/api/v1/s7", eventHandler)
+
+	go ScanTimeline()
 
 	r.Run(":80")
 }
