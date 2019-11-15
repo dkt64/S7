@@ -107,6 +107,8 @@ func ScanTimeline() {
 			var patternTimestamp1 int64
 			var patternTimestamp2 int64
 
+			nrOfImages := len(machineTimeline)
+
 			for i, image1 := range machineTimeline {
 				if i > 0 { // nie sprawdzamy obrazu pod indexem 0
 					if !ImageEqual(image1, machineTimeline[i-1]) { // sprawdamy czy nastąpiła zmiana obrazu
@@ -127,7 +129,9 @@ func ScanTimeline() {
 				}
 			}
 			if !patternFound {
-				log.Println("Pattern not found")
+				log.Println("Pattern not found in " + strconv.Itoa(nrOfImages) + " machine states records")
+			} else {
+				log.Println("Pattern found in " + strconv.Itoa(nrOfImages) + " machine states records")
 			}
 			time.Sleep(5000 * time.Millisecond)
 		}
