@@ -84,9 +84,9 @@ func SendData(c *gin.Context) {
 }
 
 //
-// ImageCompare - Wysłanie całej tablicy
+// ImageEqual - Wysłanie całej tablicy
 // ================================================================================================
-func ImageCompare(im1 MachineImage, im2 MachineImage) bool {
+func ImageEqual(im1 MachineImage, im2 MachineImage) bool {
 
 	if bytes.Compare(im1.IOImage, im2.IOImage) == 0 {
 		return true
@@ -100,14 +100,37 @@ func ImageCompare(im1 MachineImage, im2 MachineImage) bool {
 func ScanTimeline() {
 
 	for {
-		for i, image1 := range machineTimeline {
-			for j, image2 := range machineTimeline {
-				if ImageCompare(image1, image2) && i != j && ((i-j > 1) || (i-j < -1)) {
-					log.Println("timestamp = " + strconv.FormatInt(image2.Timestamp/1000000, 10) + " [ms], i = " + strconv.Itoa(i) + ", j = " + strconv.Itoa(j))
+		if plcConnected {
+			var patternFound bool
+			var patternIndex1 int
+			var patternIndex2 int
+			var patternTimestamp1 int64
+			var patternTimestamp2 int64
+
+			for i, image1 := range machineTimeline {
+				if i > 0 { // nie sprawdzamy obrazu pod indexem 0
+					if !ImageEqual(image1, machineTimeline[i-1]) { // sprawdamy czy nastąpiła zmiana obrazu
+						for j := 0; j < i; j++ {
+							image2 := machineTimeline[j]
+
+							if ImageEqual(image1, image2) {
+								patternIndex1 = i
+								patternIndex2 = j
+								patternTimestamp1 = image1.Timestamp
+								patternTimestamp2 = image2.Timestamp
+								patternFound = true
+								log.Println("Pattern found with duration " + strconv.FormatInt(patternTimestamp1/1000000-patternTimestamp2/1000000, 10) + " [ms] at indexes [" + strconv.Itoa(patternIndex1) + "][" + strconv.Itoa(patternIndex2) + "]")
+								break
+							}
+						}
+					}
 				}
 			}
+			if !patternFound {
+				log.Println("Pattern not found")
+			}
+			time.Sleep(5000 * time.Millisecond)
 		}
-		time.Sleep(3000 * time.Millisecond)
 	}
 }
 
@@ -120,6 +143,8 @@ func eventHandler(c *gin.Context) {
 	plcAddress := c.Query("plc_address")
 	slotNr, _ := strconv.Atoi(c.Query("slot_nr"))
 	period, _ := strconv.Atoi(c.Query("period"))
+
+	machineTimeline = nil
 
 	if net.ParseIP(plcAddress) != nil {
 		log.Println("Odbebrałem adres IP: " + plcAddress)
