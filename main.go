@@ -42,6 +42,10 @@ type MachineImage struct {
 // ========================================================
 var machineTimeline []MachineImage
 
+// valuesRange - Analiza zmienności danych
+// ========================================================
+var valuesRange [256][256]byte
+
 // ErrCheck - obsługa błedów
 // ================================================================================================
 func ErrCheck(errNr error) bool {
@@ -84,14 +88,28 @@ func SendData(c *gin.Context) {
 }
 
 //
-// ImageEqual - Wysłanie całej tablicy
+// ImageEqual - Porównanie obrazów - jota w jotę
 // ================================================================================================
 func ImageEqual(im1 MachineImage, im2 MachineImage) bool {
-
 	if bytes.Compare(im1.IOImage, im2.IOImage) == 0 {
 		return true
 	}
 	return false
+}
+
+//
+// ImageCompare - Zgodność obrazów w procentach
+// ================================================================================================
+func ImageCompare(im1 MachineImage, im2 MachineImage) int {
+
+	cnt := 0
+	for i := 0; i < 256; i++ {
+		if im1.IOImage[i] == im2.IOImage[i] {
+			cnt++
+		}
+	}
+
+	return 100 * cnt / 256
 }
 
 //
@@ -115,13 +133,17 @@ func ScanTimeline() {
 						for j := 0; j < i; j++ {
 							image2 := machineTimeline[j]
 
-							if ImageEqual(image1, image2) {
+							comp := ImageCompare(image1, image2)
+							if comp >= 99 {
 								patternIndex1 = i
 								patternIndex2 = j
 								patternTimestamp1 = image1.Timestamp
 								patternTimestamp2 = image2.Timestamp
 								patternFound = true
-								log.Println("Pattern found with duration " + strconv.FormatInt(patternTimestamp1/1000000-patternTimestamp2/1000000, 10) + " [ms] at indexes [" + strconv.Itoa(patternIndex1) + "][" + strconv.Itoa(patternIndex2) + "]")
+								// Drukuj jeżeli znaleźliśmy pattern powyżej 1000ms
+								if patternTimestamp1/1000000-patternTimestamp2/1000000 > 1000 {
+									log.Println("Pattern found (" + strconv.Itoa(comp) + "%) with duration " + strconv.FormatInt(patternTimestamp1/1000000-patternTimestamp2/1000000, 10) + " [ms] at indexes [" + strconv.Itoa(patternIndex1) + "][" + strconv.Itoa(patternIndex2) + "]")
+								}
 								break
 							}
 						}
@@ -149,6 +171,11 @@ func eventHandler(c *gin.Context) {
 	period, _ := strconv.Atoi(c.Query("period"))
 
 	machineTimeline = nil
+	for cval := 0; cval < 256; cval++ {
+		for cindex := 0; cindex < 256; cindex++ {
+			valuesRange[cindex][cval] = 0
+		}
+	}
 
 	if net.ParseIP(plcAddress) != nil {
 		log.Println("Odbebrałem adres IP: " + plcAddress)
@@ -197,6 +224,7 @@ func eventHandler(c *gin.Context) {
 
 			var ix int
 			lastTime := time.Now().UnixNano()
+			lastTime2 := time.Now().UnixNano()
 
 			for {
 
@@ -224,12 +252,31 @@ func eventHandler(c *gin.Context) {
 					buf = append(buf, bufMB[index])
 				}
 
+				// Dodajemy do timeline
+
 				dane := map[string]interface{}{
 					"time":    readTimeEnd,
 					"content": buf,
 				}
 
 				machineTimeline = append(machineTimeline, MachineImage{Timestamp: readTimeEnd, IOImage: buf})
+
+				// Dodajemy do valuesRange
+
+				for cval := 0; cval < 256; cval++ {
+					for cindex := 0; cindex < 256; cindex++ {
+						if buf[cindex] == byte(cval) {
+							if valuesRange[cval][cindex] < 255 {
+								valuesRange[cval][cindex]++
+							}
+						}
+					}
+				}
+
+				dane2 := map[string]interface{}{
+					// "time":    readTimeEnd,
+					"content": valuesRange,
+				}
 
 				// Wysyłamy do VISU co 500 ms
 
@@ -251,6 +298,23 @@ func eventHandler(c *gin.Context) {
 					lastTime = time.Now().UnixNano()
 
 					// log.Println(lastTime)
+				}
+
+				// Wysyłamy range co 5000 ms
+
+				if readTimeEnd-lastTime2 > 5000000000 {
+
+					sse.Encode(w, sse.Event{
+						Id:    plcAddress,
+						Event: "stats",
+						Data:  dane2,
+					})
+					// Wysłanie i poczekanie
+					w.Flush()
+
+					log.Println("Wysyłam tablicę zmian...")
+
+					lastTime2 = time.Now().UnixNano()
 				}
 
 				time.Sleep(time.Duration(period) * time.Millisecond)
@@ -279,6 +343,8 @@ func eventHandler(c *gin.Context) {
 	// 		"content": "hi!",
 	// 	},
 	// })
+
+	plcConnected = false
 
 }
 
