@@ -127,6 +127,8 @@ func ScanTimeline() {
 
 			nrOfImages := len(machineTimeline)
 
+			nrOfPeriodsFound := 0
+
 			for i, image1 := range machineTimeline {
 				if i > 0 { // nie sprawdzamy obrazu pod indexem 0
 					if !ImageEqual(image1, machineTimeline[i-1]) { // sprawdamy czy nastąpiła zmiana obrazu
@@ -143,11 +145,15 @@ func ScanTimeline() {
 								// Drukuj jeżeli znaleźliśmy pattern powyżej 1000ms
 								if patternTimestamp1/1000000-patternTimestamp2/1000000 > 1000 {
 									log.Println("Pattern found (" + strconv.Itoa(comp) + "%) with duration " + strconv.FormatInt(patternTimestamp1/1000000-patternTimestamp2/1000000, 10) + " [ms] at indexes [" + strconv.Itoa(patternIndex1) + "][" + strconv.Itoa(patternIndex2) + "]")
+									nrOfPeriodsFound++
 								}
 								break
 							}
 						}
 					}
+				}
+				if nrOfPeriodsFound > 9 {
+					break
 				}
 			}
 			if !patternFound {
