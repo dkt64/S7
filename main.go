@@ -46,6 +46,10 @@ var cyclesFound []int64
 // ========================================================
 var cyclesNrsFound []int64
 
+// maskImage - Maska obrazu - wybrane bajty nie są brane pod uwage przy rejestracji stanów maszyny
+// ========================================================
+var maskImage []byte
+
 // machineStates - Dane
 // ========================================================
 var machineStatesNr int
@@ -133,6 +137,12 @@ func AnalyzeCycles() {
 
 					comp := ImageCompare(image1, image2)
 					if comp <= comparePrecision {
+
+						// gdy jest to pierwszy napotkany wzorzec zapisujemy maskę
+						if nrOfCyclesFound == 0 {
+							maskImage = ImageDiff(image1, image2)
+						}
+
 						patternIndex1 = i
 						patternIndex2 = j
 						patternTimestamp1 = image1.Timestamp
@@ -171,10 +181,10 @@ func AnalyzeCycles() {
 
 							log.Println("images nrs for cycles:")
 							log.Println(cyclesNrsFound)
-							log.Println("image1:")
-							log.Println(image1.IOImage)
-							log.Println("image2:")
-							log.Println(image2.IOImage)
+							// log.Println("image1:")
+							// log.Println(image1.IOImage)
+							// log.Println("image2:")
+							// log.Println(image2.IOImage)
 						}
 						break
 					}
@@ -185,14 +195,19 @@ func AnalyzeCycles() {
 			break
 		}
 	}
+
 	if !patternFound {
 		log.Println("Pattern not found in " + strconv.Itoa(nrOfImages) + " machine states records, precision = " + strconv.Itoa(comparePrecision))
+		log.Println("Mask image:")
+		log.Println(maskImage)
 	} else {
 		log.Println("Pattern found in " + strconv.Itoa(nrOfImages) + " machine states records")
 		if addCycle {
 			log.Println("Cycles list:")
 			log.Println(cyclesFound)
 		}
+		log.Println("Mask image:")
+		log.Println(maskImage)
 	}
 }
 
@@ -227,15 +242,20 @@ func AnalyzeWrite() {
 // ================================================================================================
 func ScanTimeline() {
 
+	cyclesTime := 30
+
 	for {
 		if plcConnected {
 			switch etap {
 
 			case "AnalyzeCycles":
 				AnalyzeCycles()
-				if ConnectionTime() >= 30 {
+				if ConnectionTime() >= cyclesTime {
 					if len(cyclesFound) == 0 {
+						log.Println("Didn't found any cycles with precision " + strconv.Itoa(comparePrecision))
 						comparePrecision++
+						cyclesTime += 30
+						log.Println("Decreasing precision to " + strconv.Itoa(comparePrecision) + " bytes")
 					} else {
 						etap = "AnalyzeWrite"
 						log.Println("AnalyzeCycles -> AnalyzeWrite...")
@@ -252,7 +272,7 @@ func ScanTimeline() {
 			}
 			time.Sleep(5000 * time.Millisecond)
 
-			log.Println(etap + " time " + strconv.Itoa(ConnectionTime()) + "s. Found " + strconv.Itoa(machineStatesNr) + " images.")
+			log.Println(etap + " time " + strconv.Itoa(ConnectionTime()))
 		} else {
 			log.Println("Waiting for connection...")
 			time.Sleep(5000 * time.Millisecond)
