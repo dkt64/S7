@@ -21,6 +21,7 @@ const imageSize = 256
 var plcAddress string
 var plcConnected bool
 var etap string
+var comparePrecision int
 
 // MachineImage - Rekord danych
 // ========================================================
@@ -37,9 +38,13 @@ var machineTimeline []MachineImage
 // ========================================================
 var machineStates []MachineImage
 
-// cyclesFound - Znalezione patterny
+// cyclesFound - Znalezione cykle
 // ========================================================
 var cyclesFound []int64
+
+// cyclesNrsFound - Numery obrazów które posłużyły za znalezienie cykli
+// ========================================================
+var cyclesNrsFound []int64
 
 // machineStates - Dane
 // ========================================================
@@ -82,6 +87,24 @@ func ImageCompare(im1 MachineImage, im2 MachineImage) int {
 	return cnt
 }
 
+//
+// ImageDiff - Zwraca obraz z różnicami
+// ================================================================================================
+func ImageDiff(im1 MachineImage, im2 MachineImage) []byte {
+
+	im0 := make([]byte, imageSize)
+
+	for i := 0; i < imageSize; i++ {
+		if im1.IOImage[i] != im2.IOImage[i] {
+			im0[i] = 1
+		} else {
+			im0[i] = 0
+		}
+	}
+
+	return im0
+}
+
 // ConnectionTime - czas połączenia
 // ================================================================================================
 func ConnectionTime() int {
@@ -92,11 +115,12 @@ func ConnectionTime() int {
 // ================================================================================================
 func AnalyzeCycles() {
 	var patternFound bool
-	// var patternIndex1 int
-	// var patternIndex2 int
+	var patternIndex1 int
+	var patternIndex2 int
 	var patternTimestamp1 int64
 	var patternTimestamp2 int64
 	var addCycle bool
+	var cycleNrFound bool
 
 	nrOfImages := len(machineTimeline)
 	nrOfCyclesFound := 0
@@ -108,9 +132,9 @@ func AnalyzeCycles() {
 					image2 := machineTimeline[j]
 
 					comp := ImageCompare(image1, image2)
-					if comp <= 1 {
-						// patternIndex1 = i
-						// patternIndex2 = j
+					if comp <= comparePrecision {
+						patternIndex1 = i
+						patternIndex2 = j
 						patternTimestamp1 = image1.Timestamp
 						patternTimestamp2 = image2.Timestamp
 						patternFound = true
@@ -124,39 +148,45 @@ func AnalyzeCycles() {
 						for _, cycle := range cyclesFound {
 							if (newCycle < (cycle + 500)) && (newCycle > (cycle-500) && newCycle > 1000) {
 								addCycle = false
+							}
+						}
+						cycleNrFound = true
+						for _, nr := range cyclesNrsFound {
+							if nr == int64(j) {
+								cycleNrFound = false
 								break
 							}
 						}
-						if addCycle {
+
+						if addCycle && cycleNrFound {
 							cyclesFound = append(cyclesFound, newCycle)
+							cyclesNrsFound = append(cyclesNrsFound, int64(j))
+
+							log.Println("Pattern found (" +
+								strconv.Itoa(comp) + " bytes precision) with duration " +
+								strconv.FormatInt(newCycle, 10) + " [ms] at indexes [" +
+								strconv.Itoa(patternIndex1) + "][" +
+								strconv.Itoa(patternIndex2) + "]")
+							nrOfCyclesFound++
+
+							log.Println("images nrs for cycles:")
+							log.Println(cyclesNrsFound)
+							log.Println("image1:")
+							log.Println(image1.IOImage)
+							log.Println("image2:")
+							log.Println(image2.IOImage)
 						}
-
-						/*
-							if addCycle {
-								log.Println("Pattern found (" +
-									strconv.Itoa(comp) + " bytes precision) with duration " +
-									strconv.FormatInt(newCycle, 10) + " [ms] at indexes [" +
-									strconv.Itoa(patternIndex1) + "][" +
-									strconv.Itoa(patternIndex2) + "]")
-								nrOfCyclesFound++
-
-								log.Println("image1:")
-								log.Println(image1.IOImage)
-								log.Println("image2:")
-								log.Println(image2.IOImage)
-							}
-						*/
 						break
 					}
 				}
 			}
 		}
-		if nrOfCyclesFound >= 50 {
+		if nrOfCyclesFound >= 10 {
 			break
 		}
 	}
 	if !patternFound {
-		log.Println("Pattern not found in " + strconv.Itoa(nrOfImages) + " machine states records")
+		log.Println("Pattern not found in " + strconv.Itoa(nrOfImages) + " machine states records, precision = " + strconv.Itoa(comparePrecision))
 	} else {
 		log.Println("Pattern found in " + strconv.Itoa(nrOfImages) + " machine states records")
 		if addCycle {
@@ -199,30 +229,33 @@ func ScanTimeline() {
 
 	for {
 		if plcConnected {
-			log.Println(etap + " time " + strconv.Itoa(ConnectionTime()) + "s. Found " + strconv.Itoa(machineStatesNr) + " images.")
-
 			switch etap {
 
 			case "AnalyzeCycles":
 				AnalyzeCycles()
-				if ConnectionTime() >= 60 {
-					etap = "AnalyzeWrite"
-					log.Println("AnalyzeCycles -> AnalyzeWrite...")
+				if ConnectionTime() >= 30 {
+					if len(cyclesFound) == 0 {
+						comparePrecision++
+					} else {
+						etap = "AnalyzeWrite"
+						log.Println("AnalyzeCycles -> AnalyzeWrite...")
+					}
 				}
 			case "AnalyzeWrite":
 				AnalyzeWrite()
 			default:
 				if plcConnected {
-					conectionTimeStart = int(time.Now().Unix())
 					etap = "AnalyzeCycles"
 					log.Println("default -> AnalyzeCycles...")
 				}
+				conectionTimeStart = int(time.Now().Unix())
 			}
 			time.Sleep(5000 * time.Millisecond)
+
+			log.Println(etap + " time " + strconv.Itoa(ConnectionTime()) + "s. Found " + strconv.Itoa(machineStatesNr) + " images.")
 		} else {
 			log.Println("Waiting for connection...")
 			time.Sleep(5000 * time.Millisecond)
-			conectionTimeStart = int(time.Now().Unix())
 			etap = "waiting"
 		}
 	}
@@ -448,7 +481,7 @@ func eventHandler(c *gin.Context) {
 					// Wysłanie i poczekanie
 					w.Flush()
 
-					log.Println("Wysyłam tablicę zmian...")
+					// log.Println("Wysyłam tablicę zmian...")
 
 					lastTime2 = time.Now().UnixNano()
 				}
@@ -465,7 +498,7 @@ func eventHandler(c *gin.Context) {
 					// Wysłanie i poczekanie
 					w.Flush()
 
-					log.Println("Wysyłam tablicę cykli...")
+					// log.Println("Wysyłam tablicę cykli...")
 
 					lastTime3 = time.Now().UnixNano()
 				}
