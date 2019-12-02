@@ -532,6 +532,7 @@ func eventHandler(c *gin.Context) {
 
 				if emptyBuf {
 					log.Println("Pusty bufor!?")
+					plcConnected = false
 				} else {
 
 					// Dodajemy do timeline
