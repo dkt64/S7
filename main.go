@@ -243,10 +243,12 @@ func AnalyzeWrite() {
 		if newImage {
 			machineStates = append(machineStates, maskedImage)
 			machineStatesNr++
-			log.Println("New image registered nr " + strconv.Itoa(len(machineStates)))
+			// log.Println("New image registered nr " + strconv.Itoa(len(machineStates)))
 			// log.Println(maskedImage)
 		}
 	}
+	log.Println(machineStatesNr, "images registered")
+
 	actualScanID = len(machineTimeline)
 }
 
@@ -281,6 +283,7 @@ func ScanTimeline() {
 					}
 				}
 			case "AnalyzeWrite":
+				// AnalyzeCycles()
 				AnalyzeWrite()
 			default:
 				conectionTimeStart = int(time.Now().Unix())
