@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,18 +15,21 @@ import (
 	"github.com/robinson/gos7"
 )
 
-const imageSize = 256
+const startingPrecision = 0
+const imageSize = 128 * 3
+const minCycleTime = 10000
 
 var plcAddress string
 var plcConnected bool
 var etap string
 var comparePrecision int
+var firstCycle bool
 
 // MachineImage - Rekord danych
 // ========================================================
 type MachineImage struct {
-	Timestamp int64  `gorm:"AUTO_INCREMENT" form:"v" json:"Timestamp"`
-	IOImage   []byte `gorm:"not null" form:"IOImage" json:"IOImage"`
+	Timestamp int64           `gorm:"AUTO_INCREMENT" form:"v" json:"Timestamp"`
+	IOImage   [imageSize]byte `gorm:"not null" form:"IOImage" json:"IOImage"`
 }
 
 // machineTimeline - Dane
@@ -36,7 +38,7 @@ var machineTimeline []MachineImage
 
 // machineStates - Dane
 // ========================================================
-var machineStates []MachineImage
+var machineStates [][imageSize]byte
 
 // cyclesFound - Znalezione cykle
 // ========================================================
@@ -48,7 +50,7 @@ var cyclesNrsFound []int64
 
 // maskImage - Maska obrazu - wybrane bajty nie są brane pod uwage przy rejestracji stanów maszyny
 // ========================================================
-var maskImage []byte
+var maskImage [imageSize]byte
 
 // machineStates - Dane
 // ========================================================
@@ -70,20 +72,24 @@ var conectionTimeStart int
 // ImageEqual - Porównanie obrazów - jota w jotę
 // ================================================================================================
 func ImageEqual(im1 MachineImage, im2 MachineImage) bool {
-	if bytes.Compare(im1.IOImage, im2.IOImage) == 0 {
-		return true
+	cnt := 0
+	for i := 0; i < imageSize; i++ {
+		if im1.IOImage[i] != im2.IOImage[i] {
+			cnt++
+		}
 	}
-	return false
+
+	return cnt == 0
 }
 
 //
 // ImageCompare - Zgodność obrazów
 // ================================================================================================
-func ImageCompare(im1 MachineImage, im2 MachineImage) int {
+func ImageCompare(im1 [imageSize]byte, im2 [imageSize]byte) int {
 
 	cnt := 0
 	for i := 0; i < imageSize; i++ {
-		if im1.IOImage[i] != im2.IOImage[i] {
+		if im1[i] != im2[i] {
 			cnt++
 		}
 	}
@@ -94,15 +100,15 @@ func ImageCompare(im1 MachineImage, im2 MachineImage) int {
 //
 // ImageDiff - Zwraca obraz z różnicami
 // ================================================================================================
-func ImageDiff(im1 MachineImage, im2 MachineImage) []byte {
+func ImageDiff(im1 MachineImage, im2 [imageSize]byte) [imageSize]byte {
 
-	im0 := make([]byte, imageSize)
+	var im0 [imageSize]byte
 
 	for i := 0; i < imageSize; i++ {
-		if im1.IOImage[i] != im2.IOImage[i] {
-			im0[i] = 1
-		} else {
+		if im1.IOImage[i] != im2[i] {
 			im0[i] = 0
+		} else {
+			im0[i] = 0xff
 		}
 	}
 
@@ -135,19 +141,13 @@ func AnalyzeCycles() {
 				for j := 0; j < i; j++ {
 					image2 := machineTimeline[j]
 
-					comp := ImageCompare(image1, image2)
+					comp := ImageCompare(image1.IOImage, image2.IOImage)
 					if comp <= comparePrecision {
-
-						// gdy jest to pierwszy napotkany wzorzec zapisujemy maskę
-						if nrOfCyclesFound == 0 {
-							maskImage = ImageDiff(image1, image2)
-						}
 
 						patternIndex1 = i
 						patternIndex2 = j
 						patternTimestamp1 = image1.Timestamp
 						patternTimestamp2 = image2.Timestamp
-						patternFound = true
 						// Drukuj jeżeli znaleźliśmy pattern powyżej 1000ms
 						// Uwzględniamy tolerancję +/-500ms więc sprawdzamy w liście czy już takiego nie ma
 						// Dodajemy do listy patternów
@@ -156,7 +156,7 @@ func AnalyzeCycles() {
 						// log.Println("New cycle = " + strconv.FormatInt(newCycle, 10))
 						addCycle = true
 						for _, cycle := range cyclesFound {
-							if (newCycle < (cycle + 500)) && (newCycle > (cycle-500) && newCycle > 1000) {
+							if (newCycle < (cycle + 500)) && (newCycle > (cycle - 500)) {
 								addCycle = false
 							}
 						}
@@ -168,7 +168,8 @@ func AnalyzeCycles() {
 							}
 						}
 
-						if addCycle && cycleNrFound {
+						if addCycle && cycleNrFound && newCycle > minCycleTime {
+							patternFound = true
 							cyclesFound = append(cyclesFound, newCycle)
 							cyclesNrsFound = append(cyclesNrsFound, int64(j))
 
@@ -177,14 +178,24 @@ func AnalyzeCycles() {
 								strconv.FormatInt(newCycle, 10) + " [ms] at indexes [" +
 								strconv.Itoa(patternIndex1) + "][" +
 								strconv.Itoa(patternIndex2) + "]")
-							nrOfCyclesFound++
 
 							log.Println("images nrs for cycles:")
 							log.Println(cyclesNrsFound)
+
+							// gdy jest to pierwszy napotkany wzorzec zapisujemy maskę
+							if nrOfCyclesFound == 0 && !firstCycle {
+								maskImage = ImageDiff(image1, image2.IOImage)
+								firstCycle = true
+								log.Println("Mask image:")
+								log.Println(maskImage)
+							}
+
 							// log.Println("image1:")
 							// log.Println(image1.IOImage)
 							// log.Println("image2:")
 							// log.Println(image2.IOImage)
+
+							nrOfCyclesFound++
 						}
 						break
 					}
@@ -198,37 +209,45 @@ func AnalyzeCycles() {
 
 	if !patternFound {
 		log.Println("Pattern not found in " + strconv.Itoa(nrOfImages) + " machine states records, precision = " + strconv.Itoa(comparePrecision))
-		log.Println("Mask image:")
-		log.Println(maskImage)
+		// log.Println("Mask image:")
+		// log.Println(maskImage)
 	} else {
 		log.Println("Pattern found in " + strconv.Itoa(nrOfImages) + " machine states records")
 		if addCycle {
 			log.Println("Cycles list:")
 			log.Println(cyclesFound)
 		}
-		log.Println("Mask image:")
-		log.Println(maskImage)
+		// log.Println("Mask image:")
+		// log.Println(maskImage)
 	}
 }
 
 // AnalyzeWrite - zapis tylko nowych obrazów
 // ================================================================================================
 func AnalyzeWrite() {
+
+	var maskedImage [imageSize]byte
+
 	for i := actualScanID; i < len(machineTimeline); i++ {
 		newImage := true
 		for _, image2 := range machineStates {
-			if ImageCompare(machineTimeline[i], image2) == 0 {
+			// maskujemy obraz
+			for k := 0; k < imageSize; k++ {
+				maskedImage[k] = machineTimeline[i].IOImage[k] & maskImage[k]
+			}
+			if ImageCompare(maskedImage, image2) == 0 {
 				newImage = false
 				break
 			}
 		}
 		if newImage {
-			machineStates = append(machineStates, machineTimeline[i])
+			machineStates = append(machineStates, maskedImage)
 			machineStatesNr++
+			log.Println("New image registered nr " + strconv.Itoa(len(machineStates)))
+			// log.Println(maskedImage)
 		}
-		actualScanID++
 	}
-
+	actualScanID = len(machineTimeline)
 }
 
 //
@@ -242,7 +261,7 @@ func AnalyzeWrite() {
 // ================================================================================================
 func ScanTimeline() {
 
-	cyclesTime := 30
+	cyclesTime := 60
 
 	for {
 		if plcConnected {
@@ -264,21 +283,36 @@ func ScanTimeline() {
 			case "AnalyzeWrite":
 				AnalyzeWrite()
 			default:
+				conectionTimeStart = int(time.Now().Unix())
 				if plcConnected {
 					etap = "AnalyzeCycles"
 					log.Println("default -> AnalyzeCycles...")
 				}
-				conectionTimeStart = int(time.Now().Unix())
 			}
 			time.Sleep(5000 * time.Millisecond)
 
 			log.Println(etap + " time " + strconv.Itoa(ConnectionTime()))
 		} else {
+			InitVars()
+			etap = "waiting"
 			log.Println("Waiting for connection...")
 			time.Sleep(5000 * time.Millisecond)
-			etap = "waiting"
 		}
 	}
+}
+
+// InitVars - reset tablic i stanów
+// ================================================================================================
+func InitVars() {
+	machineTimeline = nil
+	machineStates = nil
+	cyclesFound = nil
+	cyclesNrsFound = nil
+	machineStatesNr = 0
+	actualScanID = 0
+	firstCycle = false
+	comparePrecision = startingPrecision
+	etap = "waiting"
 }
 
 // base64Encode
@@ -332,7 +366,11 @@ func SendData(c *gin.Context) {
 
 	// log.Println(machineTimeline[0].Timestamp)
 
-	data, _ := json.Marshal(machineTimeline)
+	data1, _ := json.Marshal(maskImage)
+	data2, _ := json.Marshal(machineStates)
+
+	var data []byte
+	data = append(data1, data2...)
 	// log.Println(string(data))
 
 	c.JSON(http.StatusOK, string(data))
@@ -348,11 +386,11 @@ func eventHandler(c *gin.Context) {
 	slotNr, _ := strconv.Atoi(c.Query("slot_nr"))
 	period, _ := strconv.Atoi(c.Query("period"))
 
-	machineTimeline = nil
-	cyclesFound = nil
+	InitVars()
+
 	for cval := 0; cval < 256; cval++ {
-		for cindex := 0; cindex < 256; cindex++ {
-			valuesRange[cindex][cval] = 0
+		for cindex := 0; cindex < imageSize; cindex++ {
+			valuesRange[cval][cindex] = 0
 		}
 	}
 
@@ -374,10 +412,17 @@ func eventHandler(c *gin.Context) {
 		client := gos7.NewClient(handler)
 		// log.Println(client)
 
+		log.Println("Wynegocjowany PDU length =", handler.PDULength)
+
 		if ErrCheck(ret) {
 			plcConnected = true
+			defer func() {
+				plcConnected = false
+			}()
+
 			bufMB := make([]byte, 128)
 			bufEB := make([]byte, 128)
+			bufAB := make([]byte, 128)
 
 			// Typ połączania
 			c.Header("Access-Control-Allow-Origin", "*")
@@ -414,118 +459,170 @@ func eventHandler(c *gin.Context) {
 					break
 				}
 
+				// Odczyt sygnałów z PLC
 				readTimeStart := time.Now().UnixNano()
-				client.AGReadMB(0, 128, bufMB)
-				client.AGReadEB(0, 128, bufEB)
+
+				// Jeżeli PDU Length większy/równy od rozmiaru obrazu to odczytujemy wszystko razem
+				if handler.PDULength >= imageSize {
+					var error1, error2, error3 string
+
+					var items = []gos7.S7DataItem{
+						gos7.S7DataItem{
+							Area:    0x81,
+							WordLen: 0x02,
+							Start:   0,
+							Amount:  128,
+							Data:    bufEB,
+							Error:   error1,
+						},
+						gos7.S7DataItem{
+							Area:    0x82,
+							WordLen: 0x02,
+							Start:   0,
+							Amount:  128,
+							Data:    bufAB,
+							Error:   error2,
+						},
+						gos7.S7DataItem{
+							Area:    0x83,
+							WordLen: 0x02,
+							Start:   0,
+							Amount:  128,
+							Data:    bufMB,
+							Error:   error3,
+						},
+					}
+					err := client.AGReadMulti(items, 3)
+					ErrCheck(err)
+
+				} else {
+					client.AGReadMB(0, 128, bufMB)
+					client.AGReadEB(0, 128, bufEB)
+					client.AGReadAB(0, 128, bufAB)
+				}
+
 				readTimeEnd := time.Now().UnixNano()
 
-				if bufEB == nil || bufMB == nil {
+				if bufMB == nil || bufEB == nil || bufAB == nil {
 					log.Println("NIL...")
 					break
 				}
 
-				var buf []byte
+				var buf [imageSize]byte
 				for index := range bufMB {
-					buf = append(buf, bufMB[index])
+					buf[index+128*0] = bufMB[index]
 				}
-				for index := range bufMB {
-					buf = append(buf, bufEB[index])
+				for index := range bufEB {
+					buf[index+128*1] = bufEB[index]
 				}
-
-				// Dodajemy do timeline
-
-				dane := map[string]interface{}{
-					"time":    readTimeEnd,
-					"content": buf,
+				for index := range bufEB {
+					buf[index+128*2] = bufAB[index]
 				}
 
-				machineTimeline = append(machineTimeline, MachineImage{Timestamp: readTimeEnd, IOImage: buf})
-
-				// Dodajemy do valuesRange
-
-				for cval := 0; cval < 256; cval++ {
-					for cindex := 0; cindex < imageSize; cindex++ {
-						if buf[cindex] == byte(cval) {
-							if valuesRange[cval][cindex] < 255 {
-								valuesRange[cval][cindex]++
-							}
-						}
+				// sprawdzamy czy same zera - jak tak to nie zapisujemy
+				emptyBuf := true
+				for i := range buf {
+					if buf[i] > 0 {
+						emptyBuf = false
 					}
 				}
 
-				rangesTab := map[string]interface{}{
-					// "time":    readTimeEnd,
-					"content": valuesRange,
+				if emptyBuf {
+					log.Println("Pusty bufor!?")
+				} else {
+
+					// Dodajemy do timeline
+
+					dane := map[string]interface{}{
+						"time":    readTimeEnd,
+						"content": buf,
+					}
+
+					machineTimeline = append(machineTimeline, MachineImage{Timestamp: readTimeEnd, IOImage: buf})
+
+					// Dodajemy do valuesRange
+
+					for cval := 0; cval < 256; cval++ {
+						for cindex := 0; cindex < imageSize; cindex++ {
+							if buf[cindex] == byte(cval) {
+								if valuesRange[cval][cindex] < 255 {
+									valuesRange[cval][cindex]++
+								}
+							}
+						}
+					}
+
+					rangesTab := map[string]interface{}{
+						// "time":    readTimeEnd,
+						"content": valuesRange,
+					}
+
+					cyclesTab := map[string]interface{}{
+						// "time":    readTimeEnd,
+						"content": cyclesFound,
+					}
+
+					// Wysyłamy do VISU co 500 ms
+
+					if readTimeEnd-lastTime > 500000000 {
+
+						sse.Encode(w, sse.Event{
+							Id:    plcAddress,
+							Event: "data",
+							Data:  dane,
+						})
+						// Wysłanie i poczekanie
+						w.Flush()
+
+						// log.Println(plcAddress + " Wysłano: " + strconv.FormatInt(timestamp, 10))
+
+						lastTime = time.Now().UnixNano()
+
+						// log.Println(lastTime)
+					}
+
+					// Wysyłamy range co 5000 ms
+
+					if readTimeEnd-lastTime2 > 5000000000 {
+
+						sse.Encode(w, sse.Event{
+							Id:    plcAddress,
+							Event: "stats",
+							Data:  rangesTab,
+						})
+						// Wysłanie i poczekanie
+						w.Flush()
+
+						// Czas ostatniego odczytu z PLC
+						log.Println("Szybkość ostatniego odczytu danych z PLC " + plcAddress + " " + strconv.FormatInt((readTimeEnd-readTimeStart)/1000000, 10) + " ms")
+
+						// log.Println("Wysyłam tablicę zmian...")
+
+						lastTime2 = time.Now().UnixNano()
+					}
+
+					// Wysyłamy listę cykli co 5000 ms
+
+					if readTimeEnd-lastTime3 > 5000000000 {
+
+						sse.Encode(w, sse.Event{
+							Id:    plcAddress,
+							Event: "cycles",
+							Data:  cyclesTab,
+						})
+						// Wysłanie i poczekanie
+						w.Flush()
+
+						// log.Println("Wysyłam tablicę cykli...")
+
+						lastTime3 = time.Now().UnixNano()
+					}
+
+					time.Sleep(time.Duration(period) * time.Millisecond)
+
+					ix++
 				}
 
-				cyclesTab := map[string]interface{}{
-					// "time":    readTimeEnd,
-					"content": cyclesFound,
-				}
-
-				// Wysyłamy do VISU co 5000 ms
-
-				if readTimeEnd-lastTime > 5000000000 {
-					// Czas ostatniego odczytu z PLC
-					log.Println("Szybkość ostatniego odczytu danych z PLC " + plcAddress + " " + strconv.FormatInt((readTimeEnd-readTimeStart)/1000000, 10) + " ms")
-				}
-
-				// Wysyłamy do VISU co 500 ms
-
-				if readTimeEnd-lastTime > 500000000 {
-
-					sse.Encode(w, sse.Event{
-						Id:    plcAddress,
-						Event: "data",
-						Data:  dane,
-					})
-					// Wysłanie i poczekanie
-					w.Flush()
-
-					// log.Println(plcAddress + " Wysłano: " + strconv.FormatInt(timestamp, 10))
-
-					lastTime = time.Now().UnixNano()
-
-					// log.Println(lastTime)
-				}
-
-				// Wysyłamy range co 5000 ms
-
-				if readTimeEnd-lastTime2 > 5000000000 {
-
-					sse.Encode(w, sse.Event{
-						Id:    plcAddress,
-						Event: "stats",
-						Data:  rangesTab,
-					})
-					// Wysłanie i poczekanie
-					w.Flush()
-
-					// log.Println("Wysyłam tablicę zmian...")
-
-					lastTime2 = time.Now().UnixNano()
-				}
-
-				// Wysyłamy listę cykli co 5000 ms
-
-				if readTimeEnd-lastTime3 > 5000000000 {
-
-					sse.Encode(w, sse.Event{
-						Id:    plcAddress,
-						Event: "cycles",
-						Data:  cyclesTab,
-					})
-					// Wysłanie i poczekanie
-					w.Flush()
-
-					// log.Println("Wysyłam tablicę cykli...")
-
-					lastTime3 = time.Now().UnixNano()
-				}
-
-				time.Sleep(time.Duration(period) * time.Millisecond)
-
-				ix++
 			}
 		} else {
 			log.Println("Problem z połączeniem z " + plcAddress)
