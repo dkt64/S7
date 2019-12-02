@@ -294,7 +294,7 @@ func ScanTimeline() {
 			}
 			time.Sleep(5000 * time.Millisecond)
 
-			log.Println(etap + " time " + strconv.Itoa(ConnectionTime()))
+			log.Println(etap, "time", ConnectionTime(), "/", cyclesTime)
 		} else {
 			InitVars()
 			etap = "waiting"
