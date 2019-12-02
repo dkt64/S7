@@ -24,6 +24,7 @@ var plcConnected bool
 var etap string
 var comparePrecision int
 var firstCycle bool
+var cyclesTime int
 
 // MachineImage - Rekord danych
 // ========================================================
@@ -263,8 +264,6 @@ func AnalyzeWrite() {
 // ================================================================================================
 func ScanTimeline() {
 
-	cyclesTime := 60
-
 	for {
 		if plcConnected {
 			switch etap {
@@ -315,7 +314,9 @@ func InitVars() {
 	actualScanID = 0
 	firstCycle = false
 	comparePrecision = startingPrecision
+	cyclesTime = 60
 	etap = "waiting"
+	cyclesTime = 60
 }
 
 // base64Encode
