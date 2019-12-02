@@ -316,7 +316,6 @@ func InitVars() {
 	comparePrecision = startingPrecision
 	cyclesTime = 60
 	etap = "waiting"
-	cyclesTime = 60
 }
 
 // base64Encode
