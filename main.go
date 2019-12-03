@@ -15,7 +15,9 @@ import (
 	"github.com/robinson/gos7"
 )
 
-const startingPrecision = 0
+const startingPrecision = 1
+const cyclesAnalyzeTime = 30
+const cyclesAnalyzeTimeAdd = 10
 const imageSize = 128 * 3
 const minCycleTime = 10000
 
@@ -25,13 +27,27 @@ var etap string
 var comparePrecision int
 var firstCycle bool
 var cyclesTime int
+var periodPrecision int64
 
 // MachineImage - Rekord danych
 // ========================================================
 type MachineImage struct {
-	Timestamp int64           `gorm:"AUTO_INCREMENT" form:"v" json:"Timestamp"`
-	IOImage   [imageSize]byte `gorm:"not null" form:"IOImage" json:"IOImage"`
+	Timestamp int64           `json:"Timestamp"`
+	IOImage   [imageSize]byte `json:"IOImage"`
 }
+
+// Transision - Przejście między stanami
+// Numer stanu z tablicy machineStates
+// ========================================================
+type Transision struct {
+	StateNrSrc int   `json:"StateNrSrc"`
+	StateNrDst int   `json:"StateNrDst"`
+	Time       int64 `json:"Time"`
+}
+
+// Transisions - Tablica przejść między stanami
+// ========================================================
+var Transisions []Transision
 
 // machineTimeline - Dane
 // ========================================================
@@ -57,9 +73,13 @@ var maskImage [imageSize]byte
 // ========================================================
 var machineStatesNr int
 
-// scanTimeline - ostatnio anlizowany obraz
+// writeID - ostatnio anlizowany obraz w funkcji Write
 // ========================================================
-var actualScanID int
+var writeID int
+
+// transID - ostatnio anlizowany obraz w funkcji Transisions
+// ========================================================
+var transID int
 
 // valuesRange - Analiza zmienności danych
 // ========================================================
@@ -96,6 +116,49 @@ func ImageCompare(im1 [imageSize]byte, im2 [imageSize]byte) int {
 	}
 
 	return cnt
+}
+
+//
+// MaskedImageEqual - Zgodność obrazów
+// Parametr nr 1 - obraz maskowany
+// Parametr nr 2 - obraz niemaskowany
+// ================================================================================================
+func MaskedImageEqual(imSrc [imageSize]byte, imMask [imageSize]byte) bool {
+
+	cnt := 0
+	for i := 0; i < imageSize; i++ {
+		if imSrc[i] != (imMask[i] & maskImage[i]) {
+			cnt++
+		}
+	}
+
+	return cnt == 0
+}
+
+//
+// MaskedImage - Zwraca obraz zamaskowany
+// ================================================================================================
+func MaskedImage(imSrc [imageSize]byte, imMask [imageSize]byte) [imageSize]byte {
+
+	var imDst [imageSize]byte
+	for i := 0; i < imageSize; i++ {
+		imDst[i] = (imSrc[i] & imMask[i])
+	}
+
+	return imDst
+}
+
+//
+// MaskState - Zwraca obraz zamaskowany
+// ================================================================================================
+func MaskState(imSrc MachineImage, imMask [imageSize]byte) MachineImage {
+
+	imDst := imSrc
+	for i := 0; i < imageSize; i++ {
+		imDst.IOImage[i] = (imDst.IOImage[i] & imMask[i])
+	}
+
+	return imDst
 }
 
 //
@@ -157,7 +220,7 @@ func AnalyzeCycles() {
 						// log.Println("New cycle = " + strconv.FormatInt(newCycle, 10))
 						addCycle = true
 						for _, cycle := range cyclesFound {
-							if (newCycle < (cycle + 500)) && (newCycle > (cycle - 500)) {
+							if (newCycle < (cycle + periodPrecision)) && (newCycle > (cycle - periodPrecision)) {
 								addCycle = false
 							}
 						}
@@ -229,7 +292,7 @@ func AnalyzeWrite() {
 
 	var maskedImage [imageSize]byte
 
-	for i := actualScanID; i < len(machineTimeline); i++ {
+	for i := writeID; i < len(machineTimeline); i++ {
 		newImage := true
 		for _, image2 := range machineStates {
 			// maskujemy obraz
@@ -250,7 +313,85 @@ func AnalyzeWrite() {
 	}
 	log.Println(machineStatesNr, "images registered")
 
-	actualScanID = len(machineTimeline)
+	writeID = len(machineTimeline)
+}
+
+// AnalyzeTransisions - zapis przejść
+// ================================================================================================
+func AnalyzeTransisions() {
+
+	for i := transID; i < len(machineTimeline)-2; i++ {
+
+		// pobierz obrazy z timeline
+		// działamy na obrazach zamaskowanych
+
+		image0 := MaskState(machineTimeline[i], maskImage)
+		imageSrc := MaskState(machineTimeline[i+1], maskImage)
+
+		// szukanie pierwszej zmiany stanu
+		if !ImageEqual(image0, imageSrc) {
+
+			// szukanie drugiej zmiaby stanu
+			for j := i + 1; j < len(machineTimeline)-1; j++ {
+
+				// pobierz obrazy z timeline
+				image1 := MaskState(machineTimeline[j], maskImage)
+				imageDst := MaskState(machineTimeline[j+1], maskImage)
+
+				// kolejna zmiana stanu
+				if !ImageEqual(image1, imageDst) {
+
+					var srcIndex int
+					var dstIndex int
+
+					// szkamy numerów stanów w tablicy stanów
+					for k, state := range machineStates {
+						if ImageCompare(state, imageSrc.IOImage) == 0 {
+							srcIndex = k
+							break
+						}
+					}
+					for k, state := range machineStates {
+						if ImageCompare(state, imageDst.IOImage) == 0 {
+							dstIndex = k
+							break
+						}
+					}
+
+					if srcIndex != dstIndex && srcIndex > 0 && dstIndex > 0 {
+
+						period1 := (imageDst.Timestamp - imageSrc.Timestamp) / 1000000
+
+						// sprawdzamy czy jest taka kompinacja w transisions
+
+						newTrans := true
+						for _, trans := range Transisions {
+							period2 := trans.Time
+							if trans.StateNrSrc == srcIndex && trans.StateNrDst == dstIndex && period1 > period2-periodPrecision && period1 < period2+periodPrecision {
+								newTrans = false
+								break
+							}
+						}
+						if newTrans {
+							Transisions = append(Transisions,
+								Transision{
+									StateNrSrc: srcIndex,
+									StateNrDst: dstIndex,
+									Time:       period1,
+								})
+							log.Println("New transision registered from", srcIndex, "to", dstIndex, "with period", period1)
+						}
+					}
+					// nowa pozycja w analizie
+					i = j - 1
+					// koniec - nie szukamy kolejnych zmian
+					break
+				}
+			}
+		}
+	}
+	transID = len(machineTimeline) - 2
+
 }
 
 //
@@ -274,7 +415,7 @@ func ScanTimeline() {
 					if len(cyclesFound) == 0 {
 						log.Println("Didn't found any cycles with precision " + strconv.Itoa(comparePrecision))
 						comparePrecision++
-						cyclesTime += 30
+						cyclesTime += cyclesAnalyzeTimeAdd
 						log.Println("Decreasing precision to " + strconv.Itoa(comparePrecision) + " bytes")
 					} else {
 						etap = "AnalyzeWrite"
@@ -284,6 +425,7 @@ func ScanTimeline() {
 			case "AnalyzeWrite":
 				// AnalyzeCycles()
 				AnalyzeWrite()
+				AnalyzeTransisions()
 			default:
 				conectionTimeStart = int(time.Now().Unix())
 				if plcConnected {
@@ -310,11 +452,14 @@ func InitVars() {
 	machineStates = nil
 	cyclesFound = nil
 	cyclesNrsFound = nil
+	Transisions = nil
 	machineStatesNr = 0
-	actualScanID = 0
+	writeID = 0
+	transID = 0
 	firstCycle = false
 	comparePrecision = startingPrecision
-	cyclesTime = 60
+	cyclesTime = cyclesAnalyzeTime
+	periodPrecision = 100
 	etap = "waiting"
 }
 
@@ -371,9 +516,11 @@ func SendData(c *gin.Context) {
 
 	data1, _ := json.Marshal(maskImage)
 	data2, _ := json.Marshal(machineStates)
+	data3, _ := json.Marshal(Transisions)
 
 	var data []byte
 	data = append(data1, data2...)
+	data = append(data, data3...)
 	// log.Println(string(data))
 
 	c.JSON(http.StatusOK, string(data))
