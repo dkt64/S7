@@ -15,9 +15,9 @@ import (
 	"github.com/robinson/gos7"
 )
 
-const startingPrecision = 1
-const cyclesAnalyzeTime = 30
-const cyclesAnalyzeTimeAdd = 10
+const startingPrecision = 0
+const cyclesAnalyzeTime = 60
+const cyclesAnalyzeTimeAdd = 30
 const imageSize = 128 * 3
 const minCycleTime = 10000
 
@@ -72,6 +72,10 @@ var maskImage [imageSize]byte
 // machineStates - Dane
 // ========================================================
 var machineStatesNr int
+
+// transisionNr - Dane
+// ========================================================
+var transisionNr int
 
 // writeID - ostatnio anlizowany obraz w funkcji Write
 // ========================================================
@@ -311,9 +315,8 @@ func AnalyzeWrite() {
 			// log.Println(maskedImage)
 		}
 	}
-	log.Println(machineStatesNr, "images registered")
-
 	writeID = len(machineTimeline)
+	log.Println(machineStatesNr, "images registered")
 }
 
 // AnalyzeTransisions - zapis przejść
@@ -379,7 +382,8 @@ func AnalyzeTransisions() {
 									StateNrDst: dstIndex,
 									Time:       period1,
 								})
-							log.Println("New transision registered from", srcIndex, "to", dstIndex, "with period", period1)
+							// log.Println("New transision registered from", srcIndex, "to", dstIndex, "with period", period1)
+							transisionNr++
 						}
 					}
 					// nowa pozycja w analizie
@@ -391,7 +395,7 @@ func AnalyzeTransisions() {
 		}
 	}
 	transID = len(machineTimeline) - 2
-
+	log.Println(transisionNr, "transisions registered")
 }
 
 //
@@ -454,6 +458,7 @@ func InitVars() {
 	cyclesNrsFound = nil
 	Transisions = nil
 	machineStatesNr = 0
+	transisionNr = 0
 	writeID = 0
 	transID = 0
 	firstCycle = false
