@@ -515,7 +515,7 @@ func Options(c *gin.Context) {
 func SendData(c *gin.Context) {
 	// Typ połączania
 	c.Header("Access-Control-Allow-Origin", "*")
-	log.Println("GetData()")
+	log.Println("SendData()")
 
 	// log.Println(machineTimeline[0].Timestamp)
 
@@ -529,6 +529,19 @@ func SendData(c *gin.Context) {
 	// log.Println(string(data))
 
 	c.JSON(http.StatusOK, string(data))
+}
+
+//
+// SendTransitions - Wysłanie tablicy Transisions
+// ================================================================================================
+func SendTransitions(c *gin.Context) {
+	// Typ połączania
+	c.Header("Access-Control-Allow-Origin", "*")
+	log.Println("SendTransitions()")
+
+	data1, _ := json.Marshal(Transisions)
+
+	c.JSON(http.StatusOK, string(data1))
 }
 
 //
@@ -825,6 +838,7 @@ func main() {
 	// r.GET("/api/v1/s7", S7Get)
 
 	r.GET("/api/v1/data", SendData)
+	r.GET("/api/v1/trans", SendTransitions)
 	r.GET("/api/v1/s7", eventHandler)
 
 	// Odpalenie drugiego wątku analizy danych
