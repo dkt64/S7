@@ -45,6 +45,18 @@ type Transision struct {
 	Time       int64 `json:"Time"`
 }
 
+// Statistics - dane statystyczne
+// ========================================================
+type Statistics struct {
+	Trans  []Transision      `json:"Trans"`
+	Stats  []int             `json:"Stats"`
+	States [][imageSize]byte `json:"States"`
+}
+
+// statistics - dane statystyczne
+// ========================================================
+var statistics Statistics
+
 // Transisions - Tablica przejść między stanami
 // ========================================================
 var Transisions []Transision
@@ -506,6 +518,10 @@ func InitVars() {
 	cyclesFound = nil
 	cyclesNrsFound = nil
 	Transisions = nil
+	statesStatistics = nil
+	statistics.States = nil
+	statistics.Stats = nil
+	statistics.Trans = nil
 	machineStatesNr = 0
 	transisionNr = 0
 	writeID = 0
@@ -569,29 +585,27 @@ func SendData(c *gin.Context) {
 
 	// log.Println(machineTimeline[0].Timestamp)
 
-	data1, _ := json.Marshal(maskImage)
-	data2, _ := json.Marshal(machineStates)
-	data3, _ := json.Marshal(Transisions)
+	statistics.States = machineStates
+	statistics.Stats = statesStatistics
+	statistics.Trans = Transisions
+	data, _ := json.MarshalIndent(statistics, "", "  ")
 
-	var data []byte
-	data = append(data1, data2...)
-	data = append(data, data3...)
-	// log.Println(string(data))
-
+	log.Println(string(data))
 	c.JSON(http.StatusOK, string(data))
-}
 
-//
-// SendTransitions - Wysłanie tablicy Transisions
-// ================================================================================================
-func SendTransitions(c *gin.Context) {
-	// Typ połączania
-	c.Header("Access-Control-Allow-Origin", "*")
-	log.Println("SendTransitions()")
+	// data1, _ := json.Marshal(maskImage)
+	// data2, _ := json.Marshal(machineStates)
+	// data3, _ := json.Marshal(Transisions)
+	// data4, _ := json.Marshal(statesStatistics)
 
-	data1, _ := json.Marshal(Transisions)
+	// var data []byte
+	// data = append(data, data1...)
+	// data = append(data, data2...)
+	// data = append(data, data3...)
+	// data = append(data, data4...)
+	// // log.Println(string(data))
 
-	c.JSON(http.StatusOK, string(data1))
+	// c.JSON(http.StatusOK, string(data))
 }
 
 //
@@ -751,15 +765,12 @@ func eventHandler(c *gin.Context) {
 				} else {
 
 					// Dodajemy do timeline
-
-					dane := map[string]interface{}{
-						"time":    readTimeEnd,
-						"content": buf,
-					}
+					// ==============================================
 
 					machineTimeline = append(machineTimeline, MachineImage{Timestamp: readTimeEnd, IOImage: buf})
 
 					// Dodajemy do valuesRange
+					// ==============================================
 
 					for cval := 0; cval < 256; cval++ {
 						for cindex := 0; cindex < imageSize; cindex++ {
@@ -771,17 +782,13 @@ func eventHandler(c *gin.Context) {
 						}
 					}
 
-					rangesTab := map[string]interface{}{
-						// "time":    readTimeEnd,
-						"content": valuesRange,
-					}
+					// Wysyłamy timeline do VISU co 500 ms (ekran PLC)
+					// ==============================================
 
-					cyclesTab := map[string]interface{}{
-						// "time":    readTimeEnd,
-						"content": cyclesFound,
+					dane := map[string]interface{}{
+						"time":    readTimeEnd,
+						"content": buf,
 					}
-
-					// Wysyłamy do VISU co 500 ms
 
 					if readTimeEnd-lastTime > 500000000 {
 
@@ -800,7 +807,18 @@ func eventHandler(c *gin.Context) {
 						// log.Println(lastTime)
 					}
 
-					// Wysyłamy range co 5000 ms
+					// Wysyłamy ranges do VISU co 5000 ms (ekran PLC)
+					// ==============================================
+
+					rangesTab := map[string]interface{}{
+						// "time":    readTimeEnd,
+						"content": valuesRange,
+					}
+
+					cyclesTab := map[string]interface{}{
+						// "time":    readTimeEnd,
+						"content": cyclesFound,
+					}
 
 					if readTimeEnd-lastTime2 > 5000000000 {
 
@@ -821,6 +839,7 @@ func eventHandler(c *gin.Context) {
 					}
 
 					// Wysyłamy listę cykli co 5000 ms
+					// ==============================================
 
 					if readTimeEnd-lastTime3 > 5000000000 {
 
@@ -839,6 +858,7 @@ func eventHandler(c *gin.Context) {
 
 					time.Sleep(time.Duration(period) * time.Millisecond)
 
+					// licznik
 					ix++
 				}
 
@@ -888,7 +908,6 @@ func main() {
 	// r.GET("/api/v1/s7", S7Get)
 
 	r.GET("/api/v1/data", SendData)
-	r.GET("/api/v1/trans", SendTransitions)
 	r.GET("/api/v1/s7", eventHandler)
 
 	// Odpalenie drugiego wątku analizy danych
