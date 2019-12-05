@@ -15,9 +15,8 @@ import (
 	"github.com/robinson/gos7"
 )
 
-const startingPrecision = 1
 const cyclesAnalyzeTime = 30
-const cyclesAnalyzeTimeAdd = 20
+const cyclesAnalyzeTimeAdd = 15
 const imageSize = 128 * 3
 const minCycleTime = 10000
 
@@ -28,6 +27,7 @@ var comparePrecision int
 var firstCycle bool
 var cyclesTime int
 var periodPrecision int64
+var startingPrecision int
 
 // MachineImage - Rekord danych
 // ========================================================
@@ -616,7 +616,7 @@ func eventHandler(c *gin.Context) {
 
 	plcAddress := c.Query("plc_address")
 	slotNr, _ := strconv.Atoi(c.Query("slot_nr"))
-	period, _ := strconv.Atoi(c.Query("period"))
+	startingPrecision, _ = strconv.Atoi(c.Query("precision"))
 
 	InitVars()
 
@@ -856,7 +856,7 @@ func eventHandler(c *gin.Context) {
 						lastTime3 = time.Now().UnixNano()
 					}
 
-					time.Sleep(time.Duration(period) * time.Millisecond)
+					time.Sleep(time.Duration(10) * time.Millisecond)
 
 					// licznik
 					ix++
