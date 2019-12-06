@@ -350,8 +350,8 @@ func AnalyzeWrite() {
 			// dodajemy również do statystyk
 			statesStatistics = append(statesStatistics, 0)
 			machineStatesNr++
-			log.Println("New image registered nr " + strconv.Itoa(len(machineStates)))
-			log.Println(maskedImage)
+			// log.Println("New image registered nr " + strconv.Itoa(len(machineStates)))
+			// log.Println(maskedImage)
 		}
 	}
 	writeID = length
@@ -376,7 +376,7 @@ func AnalyzeStatistics() {
 		}
 	}
 	stateNr = length
-	log.Println("States statistics ", statesStatistics)
+	// log.Println("States statistics ", statesStatistics)
 }
 
 // AnalyzeTransitions - zapis przejść
@@ -590,7 +590,7 @@ func SendData(c *gin.Context) {
 	statistics.Trans = Transisions
 	data, _ := json.MarshalIndent(statistics, "", "  ")
 
-	log.Println(string(data))
+	// log.Println(string(data))
 	c.JSON(http.StatusOK, string(data))
 
 	// data1, _ := json.Marshal(maskImage)
@@ -893,6 +893,8 @@ func eventHandler(c *gin.Context) {
 // main - Program główny
 // ================================================================================================
 func main() {
+
+	InitVars()
 
 	// SERVER HTTP
 	// =======================================
