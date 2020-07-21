@@ -18,7 +18,9 @@ import (
 const cyclesAnalyzeTime = 30
 const cyclesAnalyzeTimeAdd = 15
 const imageSize = 128 * 3
-const minCycleTime = 10000
+
+// const minCycleTime = 10000
+const minCycleTime = 2000
 
 var plcAddress string
 var plcConnected bool
@@ -132,14 +134,13 @@ func ImageZero(im1 [imageSize]byte) bool {
 // ImageEqual - Porównanie obrazów - jota w jotę
 // ================================================================================================
 func ImageEqual(im1 MachineImage, im2 MachineImage) bool {
-	cnt := 0
 	for i := 0; i < imageSize; i++ {
 		if im1.IOImage[i] != im2.IOImage[i] {
-			cnt++
+			return false
 		}
 	}
 
-	return cnt == 0
+	return true
 }
 
 //
@@ -500,7 +501,7 @@ func ScanTimeline() {
 			}
 			time.Sleep(5000 * time.Millisecond)
 
-			log.Println(etap, "time", ConnectionTime(), "/", cyclesTime)
+			log.Println(etap, "time", ConnectionTime(), "/", cyclesTime, "of", len(machineTimeline))
 		} else {
 			InitVars()
 			etap = "waiting"
